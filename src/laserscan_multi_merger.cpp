@@ -8,7 +8,7 @@
 #include <pcl/io/pcd_io.h>
 #include <sensor_msgs/PointCloud.h>
 #include <sensor_msgs/PointCloud2.h>
-#include <sensor_msgs/point_cloud_conversion.h>
+#include <sensor_msgs/point_cloud_conversion.h> 
 #include "sensor_msgs/LaserScan.h"
 #include "pcl_ros/point_cloud.h"
 #include <Eigen/Dense>
@@ -24,7 +24,7 @@ class LaserscanMerger
 	public:
 		LaserscanMerger();
 		void scanCallback(const sensor_msgs::LaserScan::ConstPtr &scan, std::string topic);
-		void pointcloud_to_laserscan(Eigen::MatrixXf points, pcl::PCLPointCloud2 *merged_cloud);
+		void pointcloud_to_laserscan(Eigen::MatrixXf points, pcl::PCLPointCloud2 *merged_cloud, ros::Time stamp);
 		void reconfigureCallback(laserscan_multi_mergerConfig &config, uint32_t level);
 
 	private:
@@ -73,21 +73,24 @@ void LaserscanMerger::laserscan_topic_parser()
 	ros::master::V_TopicInfo topics;
 
 	istringstream iss(laserscan_topics);
-	set<string> tokens;
-	copy(istream_iterator<string>(iss), istream_iterator<string>(), inserter<set<string>>(tokens, tokens.begin()));
+	vector<string> tokens;
+	copy(istream_iterator<string>(iss), istream_iterator<string>(), back_inserter<vector<string> >(tokens));
 	vector<string> tmp_input_topics;
 
-	while (!tokens.empty())
+	while (tmp_input_topics.size() != tokens.size())
 	{
 		ROS_INFO("Waiting for topics ...");
 		ros::master::getTopics(topics);
 		sleep(1);
 
-		for (int i = 0; i < topics.size(); i++)
+		for (int i = 0; i < tokens.size(); i++)
 		{
-			if (topics[i].datatype == "sensor_msgs/LaserScan" && tokens.erase(topics[i].name) > 0)
+			for(int j = 0; j < topics.size(); j++)
 			{
-				tmp_input_topics.push_back(topics[i].name);
+				if((tokens[i].compare(topics[j].name) == 0) && (topics[j].datatype.compare("sensor_msgs/LaserScan") == 0))
+				{
+					tmp_input_topics.push_back(topics[j].name);
+				}
 			}
 		}
 	}
@@ -192,7 +195,7 @@ void LaserscanMerger::scanCallback(const sensor_msgs::LaserScan::ConstPtr &scan,
 			#else
 				pcl::concatenatePointCloud(merged_cloud, clouds[i], merged_cloud);
 			#endif
-				clouds_modified[i] = false;
+			clouds_modified[i] = false;
 		}
 
 		point_cloud_publisher_.publish(merged_cloud);
@@ -200,14 +203,16 @@ void LaserscanMerger::scanCallback(const sensor_msgs::LaserScan::ConstPtr &scan,
 		Eigen::MatrixXf points;
 		getPointCloudAsEigen(merged_cloud, points);
 
-		pointcloud_to_laserscan(points, &merged_cloud);
+		pointcloud_to_laserscan(points, &merged_cloud, scan->header.stamp);
 	}
 }
 
-void LaserscanMerger::pointcloud_to_laserscan(Eigen::MatrixXf points, pcl::PCLPointCloud2 *merged_cloud)
+void LaserscanMerger::pointcloud_to_laserscan(Eigen::MatrixXf points, pcl::PCLPointCloud2 *merged_cloud, ros::Time stamp)
 {
 	sensor_msgs::LaserScanPtr output(new sensor_msgs::LaserScan());
 	output->header = pcl_conversions::fromPCL(merged_cloud->header);
+	output->header.frame_id = destination_frame.c_str();
+	output->header.stamp = stamp;  //fixes 
 	output->angle_min = this->angle_min;
 	output->angle_max = this->angle_max;
 	output->angle_increment = this->angle_increment;
